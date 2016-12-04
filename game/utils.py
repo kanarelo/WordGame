@@ -1,14 +1,12 @@
 
 def flatten_array(items):
-    flattened = []
-
-    for item in items:
+    def flatten(flattened, item):
         if type(item) == list:
             flattened += flatten_array(item)
         else:
             flattened.append(item)
-
-    return flattened
+        return flattened
+    return reduce(flatten, items, [])
 
 def split_word_to_letters(word):
     if word is None:

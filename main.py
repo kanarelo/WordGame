@@ -15,9 +15,7 @@ def play_game(words_file):
         game.play_game(words)
 
         play = raw_input("Play another game? [y/n] ")
-        if play.strip().startswith("y"):
-            play_another_game = True
-        elif play.strip().startswith("n"):
+        if play.strip().startswith("n"):
             play_another_game = False
     else:
         message = ""
@@ -30,5 +28,8 @@ def play_game(words_file):
         print "\nBye bye! " , message
 
 if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
+
     with open('words.txt', 'r') as words_file:
         play_game(words_file)
