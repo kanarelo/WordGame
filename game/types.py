@@ -15,40 +15,19 @@ except ImportError:
     def trange(number, desc="", *args, **kwargs):
         print desc + "..."
         return xrange(number)
-
-def find_parent_node(node, subword, current_index=0):
-    if not node:
-        return
-
-    is_complete_word = False
-    if not subword:
-        return node, is_complete_word
-
-    subword = subword.lower()
-    length_of_subword = len(subword)
-    current_letter = subword[current_index]
-    
-    search_node = node.children.get(current_letter)
-
-    if current_index == (length_of_subword - 1): 
-        is_complete_word = (subword in node.complete_words)
-    else:
-        if search_node is not None:
-            search_node, is_complete_word = find_parent_node(
-                search_node, subword, current_index=(current_index + 1))
-
-    return search_node, is_complete_word
  
-def add_word_to_node(node, word, current_index=0):
+def add_word_to_node(node, word, current_index=0, make_lower=True):
     if not word:
         return node
+    
+    if make_lower:
+        word = word.lower()
 
-    word = word.lower()
     length_of_word = len(word)
     current_letter = word[current_index]
     
     if (current_index == (length_of_word - 1)):
-        node.complete_words.add(word)
+        node.add_complete_words_list(word)
         return node
     else:
         search_node = node.children.get(current_letter)
@@ -59,12 +38,37 @@ def add_word_to_node(node, word, current_index=0):
         return add_word_to_node(
             search_node, word, current_index=(current_index + 1))
 
+def find_parent_node(node, subword, current_index=0, make_lower=True):
+    is_complete_word = False
+
+    if not node:
+        return
+
+    if not subword:
+        return node, is_complete_word
+
+    if make_lower:
+        subword = subword.lower()
+    
+    length_of_subword = len(subword)
+    current_letter = subword[current_index]
+
+    search_node = node.children.get(current_letter)
+    if current_index == (length_of_subword - 1): 
+        is_complete_word = node.is_complete_word(subword)
+    else:
+        if search_node is not None:
+            search_node, is_complete_word = find_parent_node(
+                search_node, subword, current_index=(current_index + 1))
+
+    return search_node, is_complete_word
+
 def all_possible_words(node_tuple, level=2):
-    _letter, node = node_tuple
+    (_letter, node) = node_tuple
     all_words = []
 
     if not node.children:
-        all_words += node.complete_words
+        all_words += node.get_complete_words()
     else:
         for _node_tuple in node.children.iteritems():
             all_words += all_possible_words(_node_tuple)
@@ -84,6 +88,12 @@ class Node(object):
 
     def is_complete_word(self, word):
         return (word in self.complete_words)
+
+    def add_complete_words_list(self, words):
+        return self.complete_words.add(words)
+
+    def get_complete_words(self):
+        return self.complete_words
 
     def __repr__(self):
         return """
@@ -130,7 +140,7 @@ class Dictionary(object):
         node, is_complete_word = self.find_parent_node(subword, node=node)
 
         if node is not None and node.is_complete_word(subword):
-            return node, True
+            return (node, True)
 
         try:
             # choices = {}
@@ -138,9 +148,9 @@ class Dictionary(object):
             #     if not v.is_complete_word(subword + k):
             #         choices[k] = v
             random_choice = random.choice(node.children.values())
-            return random_choice, False
+            return (random_choice, False)
         except (IndexError, AttributeError):
-            return None, False
+            return (None, False)
 
     def next_possible_move(self, subword, node=None):
         node, is_complete_word = self.nearest_node_to_subword(subword, node=node)
@@ -172,6 +182,7 @@ class Player(object):
 
 class Game(object):
     def __init__(self, no_of_players=2):
+        self.move_no = 1
         self.winner = None
         self.no_of_players = no_of_players
         self.cumulative_word = ""
@@ -203,25 +214,26 @@ class Game(object):
         self.setup_players()
 
         print colored("""
-+================================================================+
-| Welcome to the word game!                                      |
-|                                                                |
-| This is a 2-player word game, in which the players take        |
-| turns saying a letter. If a player says a letter that ends     |
-| a word, that player loses. Similarly, if a player says a       |
-| letter from which no word can be spelled, that player loses.   |
-|                                                                |
-| For example: if the letters so far are "COR", then the next    |
-| player could not say "E" (spelling "CORE") or "Z" ("CORZ"      |
-| is not the beginning to any words) without losing.             |
-|                                                                |
-+================================================================+
++==============================================================+
+| Welcome to the word game!                                    |
+|                                                              |
+| This is a 2-player word game, in which the players take      |
+| turns saying a letter. If a player says a letter that ends   |
+| a word, that player loses. Similarly, if a player says a     |
+| letter from which no word can be spelled, that player loses. |
+|                                                              |
+| For example: if the letters so far are "COR", then the next  |
+| player could not say "E" (spelling "CORE") or "Z" ("CORZ"    |
+| is not the beginning to any words) without losing.           |
+|                                                              |
++==============================================================+
         """, 
         "blue")
 
         print colored("\n%s start%s\n""" % (
             self.players[0], 
-            "s" if self.players[0].is_ai_player else ""), "red")
+            "s" if self.players[0].is_ai_player else ""), 
+            "red" if self.players[0].is_ai_player else "green")
 
         return self.players[0]
 
@@ -238,13 +250,15 @@ class Game(object):
     def is_game_over(self):
         return self.game_over
 
-    def end_game(self, winner=None):
+    def end_game(self, player, move, node, winner=None):
         if winner is None:
             winner = self.last_player
 
         self.current_node = None
         self.winner = winner
         self.game_over = True
+
+        self.concede_defeat(player, move, node)
 
     def setup_game(self, words):
         no_of_words = len(words)
@@ -275,38 +289,85 @@ class Game(object):
         self.first_player = self.get_first_player()
 
     def move_is_damned(self, move):
+        is_damned = False
         nearest_node, last_move = \
             self.dictionary.nearest_node_to_subword(
                 (self.cumulative_word + move))
 
-        if nearest_node is None:
-            return True
-        
-        if not nearest_node.children:
-            return True
+        is_damned &= (last_move is True)
+        is_damned &= (nearest_node is None)
+        is_damned &= (
+            (nearest_node is not None) and 
+            (not nearest_node.children))
 
-        return False
+        return is_damned
+
+    def ask_person_player_for_move(self):
+        if not self.cumulative_word:
+            message = "Please enter any letter to Start: "
+        else:
+            message = "Enter Next Word: "
+
+        move = raw_input(message)
+        if move:
+            move = move[0]
+        else:
+            print "Please enter a value\n"
+            move = ''
+
+        if not move.isalpha():
+            print "Invalid value, try again\n"
+            move = ''
+
+        return move.lower()
+
+    def print_player_move(self, player, move, 
+            is_complete_word=False, move_is_damned=False):
+
+        player_identifier = "⬤  %s(%s) " % (str(player), player.player_no+1)
+        new_substring = self.cumulative_word + move
+
+        if move_is_damned:
+            message_type = "Final Word:"
+        else:
+            message_type = "Incomplete" \
+                if not is_complete_word else "Complete"
+
+        message_colour = "green" if not player.is_ai_player else "red"
+
+        print colored(player_identifier, message_colour), \
+            message_type, \
+            "'%s'" % self.cumulative_word, " + ", colored("'%s'" % move, "blue"), \
+            " = ", new_substring
+
+    def concede_defeat(self, player, move, node):
+        def list_words(words):
+            if words:
+                return [("'%s'" % word) for word in words]
+            return words
+
+        if node is not None:
+            if not player.is_ai_player:
+                if node.get_complete_words():
+                    print "\nI bet you were thinking%s" % \
+                        (" either" if len(node.get_complete_words()) > 1 else ""), \
+                        ', '.join(list_words(node.get_complete_words())), "lol"
+        else:
+            if not player.is_ai_player:
+                print ("\nYour word; '%s%s', is not in the dictionary!\n" % 
+                    (self.cumulative_word, move))
+
+    def next_possible_move(self, word):
+        return self.dictionary\
+                .next_possible_move(word)
 
     def make_move(self, player):
         if player.is_ai_player:
-            move, self.last_move = self.dictionary\
-                .next_possible_move(self.cumulative_word)
+            move, self.last_move = self.next_possible_move(self.cumulative_word)
         else:
             move = None
             while not move:
-                if not self.cumulative_word:
-                    message = "Please enter any letter to start: "
-                else:
-                    message = "Enter next word: "
-
-                move = raw_input(message.upper())
-                move = move[0] if move else move
-
-                if not move:
-                    print "Please enter a value\n"
-
-                if move.isdigit():
-                    print "Invalid value, try again\n"
+                move = self.ask_person_player_for_move()
         
         node = None
 
@@ -315,37 +376,19 @@ class Game(object):
             node, is_complete_word = self.dictionary.find_parent_node(
                 self.cumulative_word + move)
 
-            if not self.move_is_damned(move):
-                print colored("⬤  %s(%s)" % (str(player), player.player_no+1),  
-                        "green" if not player.is_ai_player else "red"), \
-                    " %s word: %s" % (
-                        "Incomplete" if not is_complete_word else "Complete", 
-                        self.cumulative_word.strip()), " + ", \
-                    colored(move.lower(), "blue"), " = ", \
-                    self.cumulative_word.strip() + move
-
+            if self.move_is_damned(move):
+                self.print_player_move(player, move, 
+                    is_complete_word, move_is_damned=True)
+                self.end_game(player, move, node)
+            else:
+                self.print_player_move(player, move, is_complete_word)
                 self.cumulative_word += move
 
                 if node is not None and is_complete_word:
-                    self.end_game()
+                    self.end_game(player, move, node)
                 else:
                     self.last_player = player #set the last player
-            else:
-                print colored("⬤  %s(%s)" % (str(player), player.player_no+1),
-                    "green" if not player.is_ai_player else "red"), \
-                    " Final Word: %s" % (self.cumulative_word.strip() + move.lower())
-                if node is not None:
-                    if node.complete_words:
-                        print "\nI bet you we thinking either: ", ', '.join(node.complete_words), "lol"
 
-                else:
-                    if player.is_ai_player:
-                        print ("\nYour word; '%s%s', is not in the dictionary!\n" % 
-                            (self.cumulative_word.lower(), move.lower()))
-
-                self.end_game()
-                is_complete_word = True
-                
         return node, is_complete_word
 
     def play_game(self, words):
@@ -355,25 +398,27 @@ class Game(object):
             self.clear_game()
 
         def print_game_over():
-            print "Game Over!\n", self.get_winner_message()
+            print "\nGame Over!\n", self.get_winner_message()
             print "." * 65
             print
 
-        move_no = 1
         while not self.is_game_over():
             for i, player in enumerate(self.get_players()):
+                self.current_player = player
                 self.current_node, is_complete_word = self.make_move(player)
-
-                if move_no == 1:
+                
+                if self.move_no == 1:
                      self.game_root_node = self.current_node
 
-                if self.is_game_over():
+                if (self.is_game_over() or is_complete_word or self.current_node is None):
+                    self.winner = self.previous_player
                     print_game_over()
                     return
-
-                move_no += 1
+                
+                self.move_no += 1
+                self.previous_player = player
             else:
                 print "." * 65
                 print
-        else:
-            print_game_over()
+
+        print_game_over()
