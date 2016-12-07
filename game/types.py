@@ -38,7 +38,7 @@ def add_word_to_node(node, word, current_index=0, make_lower=True):
         return add_word_to_node(
             search_node, word, current_index=(current_index + 1))
 
-def find_parent_node(node, subword, current_index=0, make_lower=True):
+def search_for_parent_node(node, subword, current_index=0, make_lower=True):
     is_complete_word = False
 
     if not node:
@@ -58,22 +58,22 @@ def find_parent_node(node, subword, current_index=0, make_lower=True):
         is_complete_word = node.is_complete_word(subword)
     else:
         if search_node is not None:
-            search_node, is_complete_word = find_parent_node(
+            search_node, is_complete_word = search_for_parent_node(
                 search_node, subword, current_index=(current_index + 1))
 
     return search_node, is_complete_word
 
-def all_possible_words(node_tuple, level=2):
-    (_letter, node) = node_tuple
+def all_possible_words_after_node(node, level=0, end=2):
     all_words = []
 
     if not node.children:
         all_words += node.get_complete_words()
     else:
-        for _node_tuple in node.children.iteritems():
-            all_words += all_possible_words(_node_tuple)
+        for (_, child_node) in node.children.iteritems():
+            all_words += all_possible_words_after_node(
+                child_node, level=(level+1))
     
-    return flatten_array(all_words)
+    return flatten_list(all_words)
 
 class Node(object):
     def __init__(self, parent=None, letter=None, *args, **kwargs):
@@ -88,8 +88,14 @@ class Node(object):
     def is_complete_word(self, word):
         return (word in self.complete_words)
 
-    def add_complete_words_list(self, words):
-        return self.complete_words.add(words)
+    def is_odd_length_word(self, word):
+        return (word in self.odd_length_words)
+
+    def is_even_length_word(self, word):
+        return (word in self.even_length_words)
+
+    def add_complete_words_list(self, word):
+        return self.complete_words.add(word)
 
     def get_complete_words(self):
         return self.complete_words
@@ -101,11 +107,10 @@ Children: %s
 Complete Words: %s
 Has parent: %s
         """ % (
-            self.letter, 
-            self.children,# indent=2, sort_keys=True),
-            self.complete_words,
-            self.parent is not None
-        )
+        self.letter,
+        self.children,
+        self.complete_words,
+        self.parent is not None)
 
     def __str__(self, level=0):
         ret = "\t" * level + self.__repr__() + "\n"
@@ -115,63 +120,65 @@ Has parent: %s
 
         return ret
 
+is_even = lambda s: (s % 2) == 0
+is_odd  = lambda s: (s % 2) == 1
+
 class Dictionary(object):
     def __init__(self, *args, **kwargs):
         self.root_node = Node()
 
     def add_words(self, words):
+        no_of_words = len(words)
+        thousandths = no_of_words / 1000
+
+        for i in trange(thousandths, desc="Loading words...", 
+                ascii=True, unit="'000 words", ncols=75):
+            map(self.__add_word, words[(1000 * i):(1000 * (i + 1))])
+        else:
+            remaining_words = no_of_words % 1000
+            map(self.__add_word, words[-remaining_words:])
+
         return map(self.__add_word, words)
 
     def __add_word(self, word):
         if not word:
             return
 
-        return self.root_node.add_word(word)
+        parent_node = self.root_node.add_word(word)
+        return parent_node
 
     def get_root_node(self):
         return self.root_node
 
-    def find_parent_node(self, subword, node=None):
-        return find_parent_node(
-            node and node or self.root_node, subword)
-
-    def next_possible_letter(self, subword, node=None):
+    def search_for_parent_node(self, subword, node=None):
         (node, is_complete_word) = \
-            self.find_parent_node(subword, node=node)
+            search_for_parent_node(
+                node and node or self.root_node, subword)
 
         if node is not None:
-            return node, is_complete_word
+            return (node, is_complete_word)
         else:
             return (None, False)
 
-    def next_possible_word_from_subword(self, subword, node=None):
-        next_possible_letter, is_last_letter_in_word = \
-            self.next_possible_letter(subword, node=node)
-
-        if not next_possible_letter:
-            return subword
-
-        return subword + next_possible_letter 
-
-def Player(player_no, is_ai_player=False):
+def Player(game, player_no, is_ai_player=False):
     class HumanPlayer(object):
-        def __init__(self, player_no):
+        def __init__(self):
+            self.game = game
             self.player_no = player_no
+
+            self.is_ai_player = is_ai_player
+            self.is_first_player = (player_no == 0)
 
         def __eq__(self, other):
             if type(other) == int:
-                return other == self.player_no
+                return (other == self.player_no)
             else:
-                return other.player_no == other.player_no
-
-        @property
-        def is_ai_player(self):
-            return False 
+                return (other.player_no == self.player_no)
 
         def __str__(self):
             return "AI" if self.is_ai_player else "You"
 
-        def make_move(self, game):
+        def make_move(self):
             move = None
 
             while not move:
@@ -195,21 +202,59 @@ def Player(player_no, is_ai_player=False):
 
     class AIPlayer(HumanPlayer):
 
-        @property
-        def is_ai_player(self):
-            return True
-
-        def make_move(self, game):
+        def make_move(self):
             node, is_last_letter_in_word = \
-                game.next_possible_letter(game.cumulative_word)
+                game.search_for_parent_node(game.cumulative_word)
             
-            random_choice = random.choice(node.children.values())
-            return random_choice.letter
+            if node is None:
+                return
 
-    if is_ai_player:
-        return HumanPlayer(player_no)
-    else:
-        return AIPlayer(player_no)
+            length_of_subword = len(game.cumulative_word)
+            is_even = (length_of_subword % 2) == 0
+            is_odd  = (length_of_subword % 2) == 1
+            
+            get_all_forward_moves = lambda: flatten_list([
+                child.children.values() 
+                for child in node.children.values()
+                    if child.children])
+            reject_terminal_moves = lambda moves: filter(
+                lambda n: len(n.complete_words) == 0, moves)
+            make_random_move = lambda: random.choice(
+                node.children.values())
+
+            def make_educated_forward_move():
+                non_terminal_forward_moves = reject_terminal_moves(
+                    node.children and get_all_forward_moves() or [])
+
+                non_terminal_next_move = reject_terminal_moves([
+                    grandchild.parent
+                    for grandchild in non_terminal_forward_moves])
+                
+                if non_terminal_next_move:
+                    print non_terminal_next_move
+                    return random.choice(non_terminal_next_move)
+                else:
+                    return make_random_move()
+
+            if (node.children):
+                if len(node.children) == 1:
+                    choice = node.children.values()[0]
+                else:
+                    #game just started
+                    if (self.is_first_player) and (length_of_subword == 0):
+                        choice = make_random_move()
+                    elif (self.is_first_player) and (length_of_subword > 0):
+                        choice = make_educated_forward_move()
+                    elif (not self.is_first_player):
+                        choice = make_educated_forward_move()
+                    else:
+                        choice = make_educated_forward_move()
+
+                return choice.letter
+            else:
+                return
+
+    return (AIPlayer() if (is_ai_player) else HumanPlayer())
 
 class Game(object):
     def __init__(self, no_of_players=2):
@@ -218,7 +263,6 @@ class Game(object):
         self.dictionary = Dictionary()
         self.game_over = False
         self.game_root_node = None
-        self.is_last_letter_in_word = None
         self.last_player = None
         self.move_no = 1
         self.no_of_players = no_of_players
@@ -226,9 +270,6 @@ class Game(object):
         self.setup_complete = False
         self.winner = None
     
-    def add_words(self, words):
-        self.dictionary.add_words(words)
-
     def get_players(self):
         return self.players
 
@@ -239,7 +280,7 @@ class Game(object):
             ai_player = random.choice(players)
 
             self.players = [
-                Player(player, is_ai_player=(ai_player == player))
+                Player(self, player, is_ai_player=(ai_player == player))
                 for player in players ]
         
     def get_first_player(self):
@@ -293,20 +334,7 @@ class Game(object):
         self.concede_defeat(player, move, node)
 
     def setup_game(self, words):
-        no_of_words = len(words)
-        thousandths = no_of_words / 1000
-
-        for i in trange(thousandths, desc="Loading words...", 
-            ascii=True, unit="'000 words", ncols=75):
-            words_to_add = words[(1000 * i):(1000 * (i + 1))]
-            self.add_words(words_to_add)
-            del words_to_add
-        else:
-            remaining_words = no_of_words % 1000
-            words_to_add = words[-remaining_words:]
-            self.add_words(words_to_add)
-            del words_to_add
-        
+        self.dictionary.add_words(words)
         print "\nLoading complete..."
 
         self.first_player = self.get_first_player()
@@ -325,7 +353,7 @@ class Game(object):
 
         new_subword = self.cumulative_word + move
         nearest_node, is_last_letter_in_word = \
-            self.find_parent_node(new_subword)
+            self.search_for_parent_node(new_subword)
 
         is_damned &= (is_last_letter_in_word is True)
         is_damned &= (nearest_node is None)
@@ -362,7 +390,11 @@ class Game(object):
 
         if node is not None:
             if not player.is_ai_player:
-                list_of_complete_words = node.get_complete_words()
+                list_of_complete_words = all_possible_words_after_node(node)
+
+                if len(list_of_complete_words) >= 5:
+                    list_of_complete_words = random.sample(list_of_complete_words, 5)
+
                 if list_of_complete_words:
                     print "\nI bet you were thinking%s" % \
                         (" either" if len(list_of_complete_words) > 1 else ""), \
@@ -372,20 +404,17 @@ class Game(object):
                 print ("\nYour word; '%s%s', is not in the dictionary!\n" % 
                     (self.cumulative_word, move))
 
-    def next_possible_letter(self, word):
-        return self.dictionary.next_possible_letter(word)
-
-    def find_parent_node(self, subword):
+    def search_for_parent_node(self, subword):
         return self.dictionary\
-                .find_parent_node(subword)
+                .search_for_parent_node(subword)
 
     def make_move(self, player):
         node = None
-        move = player.make_move(self)
+        move = player.make_move()
 
         is_complete_word = False
         if move is not None:
-            node, is_complete_word = self.find_parent_node(
+            node, is_complete_word = self.search_for_parent_node(
                 self.cumulative_word + move)
 
             if self.move_is_damned(move):

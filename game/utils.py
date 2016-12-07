@@ -1,8 +1,8 @@
 
-def flatten_array(items):
+def flatten_list(items):
     def flatten(flattened, item):
         if type(item) == list:
-            flattened += flatten_array(item)
+            flattened += flatten_list(item)
         else:
             flattened.append(item)
         return flattened
