@@ -19,6 +19,8 @@ except ImportError:
 def add_word_to_node(node, word, current_index=0, make_lower=True):
     if not word:
         return node
+
+    node.word_count += 1
     
     if make_lower:
         word = word.lower()
@@ -27,8 +29,11 @@ def add_word_to_node(node, word, current_index=0, make_lower=True):
     current_letter = word[current_index]
     
     if (current_index == (length_of_word - 1)):
-        node.add_complete_words_list(word)
-        return node
+        n = Node(parent=node, letter=current_letter)
+        node.children[current_letter] = n
+
+        n.add_complete_words_list(word)
+        return n
     else:
         search_node = node.children.get(current_letter)
         if search_node is None:
@@ -36,7 +41,8 @@ def add_word_to_node(node, word, current_index=0, make_lower=True):
             node.children[current_letter] = search_node
 
         return add_word_to_node(
-            search_node, word, current_index=(current_index + 1))
+            search_node, word, 
+            current_index=(current_index + 1))
 
 def search_for_parent_node(node, subword, current_index=0, make_lower=True):
     is_complete_word = False
@@ -83,6 +89,7 @@ class Node(object):
         self.complete_words = set()
         self.odd_length_words = set()
         self.even_length_words = set()
+        self.word_count = 0
 
     def add_word(self, word):
         return add_word_to_node(self, word)
@@ -102,13 +109,10 @@ class Node(object):
         return self.complete_words
 
     def __repr__(self):
-        return "%s - %s" % (self.letter, self.complete_words) or ''
+        return  self.letter or ''
 
     def __str__(self, level=0):
         return str(repr(self))
-
-is_even = lambda s: (s % 2) == 0
-is_odd  = lambda s: (s % 2) == 1
 
 class Dictionary(object):
     def __init__(self, *args, **kwargs):
@@ -117,15 +121,16 @@ class Dictionary(object):
     def add_words(self, words):
         no_of_words = len(words)
         thousandths = no_of_words / 1000
+        w = []
 
         for i in trange(thousandths, desc="Loading words...", 
                 ascii=True, unit="'000 words", ncols=75):
-            map(self.__add_word, words[(1000 * i):(1000 * (i + 1))])
+            w += map(self.__add_word, words[(1000 * i):(1000 * (i + 1))])
         else:
             remaining_words = no_of_words % 1000
-            map(self.__add_word, words[-remaining_words:])
+            w += map(self.__add_word, words[-remaining_words:])
 
-        return map(self.__add_word, words)
+        return w
 
     def __add_word(self, word):
         if not word:
@@ -171,19 +176,19 @@ def Player(game, player_no, is_ai_player=False):
 
             while not move:
                 if not game.cumulative_word:
-                    message = "Please enter any letter to Start: "
+                    message = "\nPlease enter any letter to Start: "
                 else:
-                    message = "Enter Next Word: "
+                    message = "\nEnter Next Word: "
                     
                 move = raw_input(message)
                 if move:
                     move = move[0]
                 else:
-                    print "Please enter a value\n"
+                    print "\nPlease enter a value\n"
                     move = ''
 
                 if not move.isalpha():
-                    print "Invalid value, try again\n"
+                    print "\nInvalid value, try again\n"
                     move = ''
 
             return move.lower()
@@ -195,45 +200,47 @@ def Player(game, player_no, is_ai_player=False):
 
             super(AIPlayer, self).__init__()
 
-        def populate_winning_moves(self, node, move_no=0, winning_moves={}):
-            if node.complete_words:
-                if self.is_first_player:
-                    if node.even_length_words:
-                        if winning_moves.get(move_no) is None:
-                            winning_moves[move_no] = []
-                        #player can only win if the word is even lengthed
-                        winning_moves[move_no].append(node)
-                elif self.is_second_player:
-                    if node.odd_length_words:
-                        if winning_moves.get(move_no) is None:
-                            winning_moves[move_no] = []
+        def populate_winning_moves(self, 
+                node, move_no=0, winning_moves={}):
 
-                        winning_moves[move_no].append(node)
-            elif node.children:
-                for n in node.children.values():
+            def find_winning_moves(n):
+                if n.children and not n.complete_words:
+                    #reject nodes that dont have grandchildren. 
+                    #We want to see one step ahead
                     winning_moves[n] = {}
+                    
                     self.populate_winning_moves(
-                        n, 
+                        n,
                         move_no=(move_no + 1), 
                         winning_moves=winning_moves[n])
 
+                    if winning_moves[n] == {}:
+                        del winning_moves[n]
+
+                elif n.complete_words:
+                    if (self.is_first_player and n.even_length_words) or \
+                       (self.is_second_player and n.odd_length_words):
+                        winning_moves[n] = n
+
+            map(find_winning_moves, node.children.values())
+
         def make_random_move(self, node):
-            return node.children and random.choice(node.children.values()) or None
+            return node.children and \
+                random.choice(node.children.values()) or None
+
+        def choose_path_with_most_wins(self, forward_moves): 
+            return random.choice(forward_moves)
         
         def make_educated_forward_move(self, node):
-            def get_all_winning_forward_moves():
-                self.winning_moves = {}
-                self.populate_winning_moves(
-                    node, 
-                    move_no=self.game.move_no, 
-                    winning_moves=self.winning_moves)
-
-                return self.winning_moves
+            self.winning_moves = {}
+            self.populate_winning_moves(
+                node, 
+                move_no=self.game.move_no, 
+                winning_moves=self.winning_moves)
             
-            from pprint import pprint
-            print pprint(get_all_winning_forward_moves())
-            
-            return self.make_random_move(node)
+            if self.winning_moves:
+                return self.choose_path_with_most_wins(
+                    self.winning_moves.keys()) 
 
         def make_move(self):
             subword = self.game.cumulative_word
@@ -243,30 +250,17 @@ def Player(game, player_no, is_ai_player=False):
                 node = self.game.current_node
                 is_last_letter_in_word = node.is_complete_word(subword)
             else:
-                node, is_last_letter_in_word = \
-                    self.game.dictionary.root_node, False
+                node = self.game.dictionary.root_node
+                is_last_letter_in_word = False
             
-            if node is None or is_last_letter_in_word:
-                return
-            
-            if (node.children):
+            if node and node.children or not is_last_letter_in_word:
                 if len(node.children) == 1:
                     choice = node.children.values()[0]
                 else:
-                    #game just started
-                    # if (self.is_first_player) and (length_of_subword == 0):
-                    #     choice = self.make_random_move(node)
-                    # elif (self.is_first_player) and (length_of_subword > 0):
-                    #     choice = self.make_educated_forward_move(node)
-                    # elif (not self.is_first_player):
-                    #     choice = self.make_educated_forward_move(node)
-                    # else:
                     choice = self.make_educated_forward_move(node)
                 
                 if choice is not None:
                     return choice.letter
-            else:
-                return self.make_random_move(node)
 
     return (AIPlayer() if (is_ai_player) else HumanPlayer())
 
@@ -294,28 +288,14 @@ class Game(object):
             ai_player = random.choice(players)
 
             self.players = [
-                Player(self, player, is_ai_player=(ai_player == player))
-                for player in players ]
-        
+                Player(self, player_no,
+                    is_ai_player=(ai_player == player_no))
+                        for player_no in players ]
+
     def get_first_player(self):
         self.setup_players()
 
-        print colored("""
-+==============================================================+
-| Welcome to the word game!                                    |
-|                                                              |
-| This is a 2-player word game, in which the players take      |
-| turns saying a letter. If a player says a letter that ends   |
-| a word, that player loses. Similarly, if a player says a     |
-| letter from which no word can be spelled, that player loses. |
-|                                                              |
-| For example: if the letters so far are "COR", then the next  |
-| player could not say "E" (spelling "CORE") or "Z" ("CORZ"    |
-| is not the beginning to any words) without losing.           |
-|                                                              |
-+==============================================================+
-        """, 
-        "blue")
+        print_game_message()
 
         print colored("\n%s start%s\n""" % (
             self.players[0], 
