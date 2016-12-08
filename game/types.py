@@ -81,6 +81,8 @@ class Node(object):
         self.letter = letter
         self.children = dict()
         self.complete_words = set()
+        self.odd_length_words = set()
+        self.even_length_words = set()
 
     def add_word(self, word):
         return add_word_to_node(self, word)
@@ -88,37 +90,22 @@ class Node(object):
     def is_complete_word(self, word):
         return (word in self.complete_words)
 
-    def is_odd_length_word(self, word):
-        return (word in self.odd_length_words)
-
-    def is_even_length_word(self, word):
-        return (word in self.even_length_words)
-
     def add_complete_words_list(self, word):
+        if is_even(len(word)):
+            self.even_length_words.add(word)
+        else:
+            self.odd_length_words.add(word)
+
         return self.complete_words.add(word)
 
     def get_complete_words(self):
         return self.complete_words
 
     def __repr__(self):
-        return """
-Node: (%s)[letter]
-Children: %s
-Complete Words: %s
-Has parent: %s
-        """ % (
-        self.letter,
-        self.children,
-        self.complete_words,
-        self.parent is not None)
+        return "%s - %s" % (self.letter, self.complete_words) or ''
 
     def __str__(self, level=0):
-        ret = "\t" * level + self.__repr__() + "\n"
-
-        # for key, child in self.children.items():
-        #     ret += child.__str__(level=1)
-
-        return ret
+        return str(repr(self))
 
 is_even = lambda s: (s % 2) == 0
 is_odd  = lambda s: (s % 2) == 1
@@ -168,6 +155,7 @@ def Player(game, player_no, is_ai_player=False):
 
             self.is_ai_player = is_ai_player
             self.is_first_player = (player_no == 0)
+            self.is_second_player = (player_no == 1)
 
         def __eq__(self, other):
             if type(other) == int:
@@ -200,59 +188,85 @@ def Player(game, player_no, is_ai_player=False):
 
             return move.lower()
 
+    #------------------
     class AIPlayer(HumanPlayer):
+        def __init__(self):
+            self.winning_moves = {}
+
+            super(AIPlayer, self).__init__()
+
+        def populate_winning_moves(self, node, move_no=0, winning_moves={}):
+            if node.complete_words:
+                if self.is_first_player:
+                    if node.even_length_words:
+                        if winning_moves.get(move_no) is None:
+                            winning_moves[move_no] = []
+                        #player can only win if the word is even lengthed
+                        winning_moves[move_no].append(node)
+                elif self.is_second_player:
+                    if node.odd_length_words:
+                        if winning_moves.get(move_no) is None:
+                            winning_moves[move_no] = []
+
+                        winning_moves[move_no].append(node)
+            elif node.children:
+                for n in node.children.values():
+                    winning_moves[n] = {}
+                    self.populate_winning_moves(
+                        n, 
+                        move_no=(move_no + 1), 
+                        winning_moves=winning_moves[n])
+
+        def make_random_move(self, node):
+            return node.children and random.choice(node.children.values()) or None
+        
+        def make_educated_forward_move(self, node):
+            def get_all_winning_forward_moves():
+                self.winning_moves = {}
+                self.populate_winning_moves(
+                    node, 
+                    move_no=self.game.move_no, 
+                    winning_moves=self.winning_moves)
+
+                return self.winning_moves
+            
+            from pprint import pprint
+            print pprint(get_all_winning_forward_moves())
+            
+            return self.make_random_move(node)
 
         def make_move(self):
-            node, is_last_letter_in_word = \
-                game.search_for_parent_node(game.cumulative_word)
+            subword = self.game.cumulative_word
+            length_of_subword = len(subword)
+
+            if self.game.current_node:
+                node = self.game.current_node
+                is_last_letter_in_word = node.is_complete_word(subword)
+            else:
+                node, is_last_letter_in_word = \
+                    self.game.dictionary.root_node, False
             
-            if node is None:
+            if node is None or is_last_letter_in_word:
                 return
-
-            length_of_subword = len(game.cumulative_word)
-            is_even = (length_of_subword % 2) == 0
-            is_odd  = (length_of_subword % 2) == 1
             
-            get_all_forward_moves = lambda: flatten_list([
-                child.children.values() 
-                for child in node.children.values()
-                    if child.children])
-            reject_terminal_moves = lambda moves: filter(
-                lambda n: len(n.complete_words) == 0, moves)
-            make_random_move = lambda: random.choice(
-                node.children.values())
-
-            def make_educated_forward_move():
-                non_terminal_forward_moves = reject_terminal_moves(
-                    node.children and get_all_forward_moves() or [])
-
-                non_terminal_next_move = reject_terminal_moves([
-                    grandchild.parent
-                    for grandchild in non_terminal_forward_moves])
-                
-                if non_terminal_next_move:
-                    print non_terminal_next_move
-                    return random.choice(non_terminal_next_move)
-                else:
-                    return make_random_move()
-
             if (node.children):
                 if len(node.children) == 1:
                     choice = node.children.values()[0]
                 else:
                     #game just started
-                    if (self.is_first_player) and (length_of_subword == 0):
-                        choice = make_random_move()
-                    elif (self.is_first_player) and (length_of_subword > 0):
-                        choice = make_educated_forward_move()
-                    elif (not self.is_first_player):
-                        choice = make_educated_forward_move()
-                    else:
-                        choice = make_educated_forward_move()
-
-                return choice.letter
+                    # if (self.is_first_player) and (length_of_subword == 0):
+                    #     choice = self.make_random_move(node)
+                    # elif (self.is_first_player) and (length_of_subword > 0):
+                    #     choice = self.make_educated_forward_move(node)
+                    # elif (not self.is_first_player):
+                    #     choice = self.make_educated_forward_move(node)
+                    # else:
+                    choice = self.make_educated_forward_move(node)
+                
+                if choice is not None:
+                    return choice.letter
             else:
-                return
+                return self.make_random_move(node)
 
     return (AIPlayer() if (is_ai_player) else HumanPlayer())
 
@@ -341,7 +355,7 @@ class Game(object):
         self.setup_complete = True
 
     def clear_game(self):
-        self.current_node = None,
+        self.current_node = None
         self.game_over = False
         self.cumulative_word = ""
         self.game_root_node = None
