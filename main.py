@@ -25,7 +25,7 @@ def play_game(words_file):
             else:
                 message = colored("You rock!", "green")
 
-        print "\nBye bye! " , message
+        print "\nBye bye!" , message
 
 if __name__ == "__main__":
     import doctest

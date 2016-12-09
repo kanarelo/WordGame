@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
+from pprint import pprint
 
 import json
 import random
+
 from .utils import *
 
 try:
@@ -60,8 +62,9 @@ def search_for_parent_node(node, subword, current_index=0, make_lower=True):
     current_letter = subword[current_index]
 
     search_node = node.children.get(current_letter)
-    if current_index == (length_of_subword - 1): 
-        is_complete_word = node.is_complete_word(subword)
+    if current_index == (length_of_subword - 1):
+        if search_node is not None:
+            is_complete_word = search_node.is_complete_word(subword)
     else:
         if search_node is not None:
             search_node, is_complete_word = search_for_parent_node(
@@ -109,7 +112,10 @@ class Node(object):
         return self.complete_words
 
     def __repr__(self):
-        return  self.letter or ''
+        if self.complete_words:
+            return "%s" % (list(self.complete_words))
+        else: 
+            return "'%s'" % self.letter
 
     def __str__(self, level=0):
         return str(repr(self))
@@ -194,6 +200,35 @@ def Player(game, player_no, is_ai_player=False):
             return move.lower()
 
     #------------------
+    def get_all_non_terminal_forward_moves(next_possible_moves):
+        """
+        1. I play
+        2. Human plays
+        3. Then I play
+        """
+        def reject_terminal_moves(nodes):
+            return filter(
+                lambda n: len(n.complete_words) == 0, 
+                nodes)
+
+        next_possible_human_moves = flatten_list([
+            next_possible_move.children.values()
+                for next_possible_move in next_possible_moves
+                    if (next_possible_move.children and not 
+                            next_possible_move.complete_words)])
+
+        moves_one_step_ahead = reject_terminal_moves(
+            flatten_list([
+                next_possible_human_move.children.values()
+                    for next_possible_human_move in next_possible_human_moves]))
+
+        non_terminal_next_possible_moves = reject_terminal_moves(
+            set(m.parent for m in 
+                set([move.parent 
+                    for move in moves_one_step_ahead])))
+
+        return next_possible_moves
+
     class AIPlayer(HumanPlayer):
         def __init__(self):
             self.winning_moves = {}
@@ -205,42 +240,55 @@ def Player(game, player_no, is_ai_player=False):
 
             def find_winning_moves(n):
                 if n.children and not n.complete_words:
-                    #reject nodes that dont have grandchildren. 
-                    #We want to see one step ahead
+                    # Reject nodes that dont have grandchildren. 
+                    # We want to see one step ahead
                     winning_moves[n] = {}
                     
-                    self.populate_winning_moves(
+                    all_moves = self.populate_winning_moves(
                         n,
                         move_no=(move_no + 1), 
                         winning_moves=winning_moves[n])
 
                     if winning_moves[n] == {}:
                         del winning_moves[n]
+                        return False
 
+                    if not any(all_moves):
+                        del winning_moves[n]
+                        return False
                 elif n.complete_words:
-                    if (self.is_first_player and n.even_length_words) or \
-                       (self.is_second_player and n.odd_length_words):
+                    if ((self.is_first_player and n.even_length_words) or \
+                       (self.is_second_player and n.odd_length_words)) and \
+                       (not (n.odd_length_words and n.even_length_words)):
                         winning_moves[n] = n
+                    else:
+                        return False
 
-            map(find_winning_moves, node.children.values())
+                return True
+
+            return node.children and \
+                map(find_winning_moves, node.children.values()) or []
 
         def make_random_move(self, node):
             return node.children and \
                 random.choice(node.children.values()) or None
-
-        def choose_path_with_most_wins(self, forward_moves): 
-            return random.choice(forward_moves)
         
         def make_educated_forward_move(self, node):
-            self.winning_moves = {}
+            if self.winning_moves:
+                del self.winning_moves 
+                self.winning_moves = {}
+
             self.populate_winning_moves(
                 node, 
                 move_no=self.game.move_no, 
                 winning_moves=self.winning_moves)
-            
+
             if self.winning_moves:
-                return self.choose_path_with_most_wins(
-                    self.winning_moves.keys()) 
+                winning_moves = self.winning_moves.keys()
+
+                return random.choice(
+                    sorted(get_all_non_terminal_forward_moves(winning_moves),
+                        key=lambda n: n.word_count))
 
         def make_move(self):
             subword = self.game.cumulative_word
@@ -294,9 +342,7 @@ class Game(object):
 
     def get_first_player(self):
         self.setup_players()
-
         print_game_message()
-
         print colored("\n%s start%s\n""" % (
             self.players[0], 
             "s" if self.players[0].is_ai_player else ""), 
@@ -320,6 +366,9 @@ class Game(object):
     def end_game(self, player, move, node, winner=None):
         if winner is None:
             winner = self.last_player
+
+        if self.is_game_over():
+            return
 
         self.current_node = None
         self.winner = winner
@@ -350,10 +399,10 @@ class Game(object):
             self.search_for_parent_node(new_subword)
 
         is_damned &= (is_last_letter_in_word is True)
-        is_damned &= (nearest_node is None)
         is_damned &= (
             (nearest_node is not None) and 
             (not nearest_node.children))
+        is_damned |= (nearest_node is None)
 
         return is_damned
 
@@ -399,8 +448,7 @@ class Game(object):
                     (self.cumulative_word, move))
 
     def search_for_parent_node(self, subword):
-        return self.dictionary\
-                .search_for_parent_node(subword)
+        return self.dictionary.search_for_parent_node(subword)
 
     def make_move(self, player):
         node = None
@@ -424,7 +472,7 @@ class Game(object):
                 else:
                     self.last_player = player #set the last player
 
-        return node, is_complete_word
+        return move, node, is_complete_word
 
     def play_game(self, words):
         if not self.setup_complete:
@@ -440,20 +488,22 @@ class Game(object):
         while not self.is_game_over():
             for i, player in enumerate(self.get_players()):
                 self.current_player = player
-                self.current_node, is_complete_word = self.make_move(player)
+                move, self.current_node, is_complete_word = self.make_move(player)
                 
                 if self.move_no == 1:
                      self.game_root_node = self.current_node
 
-                if (self.is_game_over() or is_complete_word or self.current_node is None):
+                if (is_complete_word) or (self.current_node is None):
+                    self.end_game(player, move, self.current_node)
+                    
+                if self.is_game_over():
                     self.winner = self.previous_player
-                    print_game_over()
-                    return
+                    break
                 
                 self.move_no += 1
                 self.previous_player = player
             else:
                 print "." * 65
                 print
-
-        print_game_over()
+        else:
+            print_game_over()
