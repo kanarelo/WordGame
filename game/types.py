@@ -22,7 +22,8 @@ def add_word_to_node(node, word, current_index=0, make_lower=True):
     if not word:
         return node
 
-    node.word_count += 1
+    if current_index == 0:
+        node.word_count += 1
     
     if make_lower:
         word = word.lower()
@@ -200,40 +201,52 @@ def Player(game, player_no, is_ai_player=False):
             return move.lower()
 
     #------------------
-    def get_all_non_terminal_forward_moves(next_possible_moves):
-        """
-        1. I play
-        2. Human plays
-        3. Then I play
-        """
-        def reject_terminal_moves(nodes):
-            return filter(
-                lambda n: len(n.complete_words) == 0, 
-                nodes)
-
-        next_possible_human_moves = flatten_list([
-            next_possible_move.children.values()
-                for next_possible_move in next_possible_moves
-                    if (next_possible_move.children and not 
-                            next_possible_move.complete_words)])
-
-        moves_one_step_ahead = reject_terminal_moves(
-            flatten_list([
-                next_possible_human_move.children.values()
-                    for next_possible_human_move in next_possible_human_moves]))
-
-        non_terminal_next_possible_moves = reject_terminal_moves(
-            set(m.parent for m in 
-                set([move.parent 
-                    for move in moves_one_step_ahead])))
-
-        return next_possible_moves
 
     class AIPlayer(HumanPlayer):
         def __init__(self):
             self.winning_moves = {}
 
             super(AIPlayer, self).__init__()
+
+        def is_winning_move(self, node):
+            return (len(node.complete_words) > 0) and (
+                ((self.is_first_player and node.even_length_words) or \
+                (self.is_second_player and node.odd_length_words)) and \
+                (not (node.odd_length_words and node.even_length_words)))
+
+        def is_terminal_move(self, node):
+            return (
+                len(node.children) == 0 or 
+                len(node.complete_words) > 0)
+
+        def reject_terminal_moves(self, nodes):
+            return filter(lambda n: not self.is_terminal_move(n), nodes)
+
+        def get_all_non_terminal_forward_moves(self, next_possible_moves):
+            """
+            1. I play
+            2. Human plays
+            3. Then I play
+            """
+
+            next_possible_human_moves = flatten_list([
+                next_possible_move.children.values()
+                    for next_possible_move in next_possible_moves ])
+
+            #user may choose a terminal move... thats up to them, lets include them
+            moves_one_step_ahead = \
+                self.reject_terminal_moves(
+                    flatten_list([
+                        next_possible_human_move.children.values()
+                            for next_possible_human_move in 
+                                next_possible_human_moves ]))
+
+            non_terminal_next_possible_moves = list(
+                set(m.parent for m in 
+                    set([move.parent 
+                        for move in moves_one_step_ahead])))
+
+            return non_terminal_next_possible_moves
 
         def populate_winning_moves(self, 
                 node, move_no=0, winning_moves={}):
@@ -244,23 +257,20 @@ def Player(game, player_no, is_ai_player=False):
                     # We want to see one step ahead
                     winning_moves[n] = {}
                     
-                    all_moves = self.populate_winning_moves(
-                        n,
+                    all_moves = self.populate_winning_moves(n,
                         move_no=(move_no + 1), 
                         winning_moves=winning_moves[n])
-
+                    
                     if winning_moves[n] == {}:
                         del winning_moves[n]
                         return False
 
-                    if not any(all_moves):
-                        del winning_moves[n]
-                        return False
                 elif n.complete_words:
-                    if ((self.is_first_player and n.even_length_words) or \
-                       (self.is_second_player and n.odd_length_words)) and \
-                       (not (n.odd_length_words and n.even_length_words)):
-                        winning_moves[n] = n
+                    if self.is_winning_move(n):
+                        if self.is_first_player and len(min(n.complete_words)) > 4: 
+                            winning_moves[n] = n
+                        elif self.is_second_player and len(min(n.complete_words)) > 5:
+                            winning_moves[n] = n
                     else:
                         return False
 
@@ -285,10 +295,9 @@ def Player(game, player_no, is_ai_player=False):
 
             if self.winning_moves:
                 winning_moves = self.winning_moves.keys()
-
-                return random.choice(
-                    sorted(get_all_non_terminal_forward_moves(winning_moves),
-                        key=lambda n: n.word_count))
+                non_terminal_winning_moves = \
+                    self.get_all_non_terminal_forward_moves(winning_moves)
+                return random.choice(winning_moves)
 
         def make_move(self):
             subword = self.game.cumulative_word
